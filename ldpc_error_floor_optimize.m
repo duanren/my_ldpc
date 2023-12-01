@@ -4,8 +4,8 @@ clc,clear,close all;
 rng('shuffle');
 
 %从当前目录下H加载矩阵
-load("H_1_3.mat");
-% load("H_1_6.mat");
+% load("H_1_3.mat");
+load("H_1_6.mat");
 % load("H_1_10.mat");
 % load("H_1_20.mat");
 
@@ -15,40 +15,47 @@ H=double(H);
 
 %配置LDPC编译码器
 cfgLDPCEnc = ldpcEncoderConfig(rearranged_H);
-cfgLDPCDec = ldpcDecoderConfig(rearranged_H,'offset-min-sum');
+cfgLDPCDec1 = ldpcDecoderConfig(rearranged_H,'norm-min-sum');
+cfgLDPCDec2 = ldpcDecoderConfig(rearranged_H,'offset-min-sum');
 
 %仿真次数times
-times=1e9;
+times=1e5;
 
 %BIAWGN信道
 %信道参数Eb/n0
-Ebn0=0:0.1:1.5;%仿真起点
-n=length(Ebn0);
-%记录误比特数be、误包数ble、误比特率ber,误包率bler,总迭代次数ite和平均迭代次数iter
-be=zeros(1,n);
-ble=zeros(1,n);
-ber=zeros(1,n);
-bler=zeros(1,n);
+Ebn0=0.6;%仿真起点
+alpha=[0.1 0.2 0.3 0.4 0.5 0.55 0.6 0.65 0.7 0.75 0.8 0.9];
+beta=alpha;
+n=length(beta);
+%记录误比特数be、误包数ble、误比特率ber,误包率bler
+be1=zeros(1,n);
+ble1=zeros(1,n);
+ber1=zeros(1,n);
+bler1=zeros(1,n);
+be2=zeros(1,n);
+ble2=zeros(1,n);
+ber2=zeros(1,n);
+bler2=zeros(1,n);
 minble=100; % 错100个包时停止
-ite=zeros(1,n);
-iter=zeros(1,n);
 
 %BPSK调制
 bpskmod = comm.BPSKModulator;
 %BP最大迭代次数
-maxnumiter=200;
+maxnumiter=100;
 
-%遍历Ebn0
+%Eb/N0与SNR的转换
+if cfgLDPCEnc.NumInformationBits==1040
+    snr=Ebn0+10*log10(1/3);
+else
+    snr=Ebn0+10*log10(cfgLDPCEnc.CodeRate);
+end
+%BPSK解调
+bpskdemod = comm.BPSKDemodulator('DecisionMethod','Approximate log-likelihood ratio', ...
+    'Variance',1/10^(snr/10));
+
 for kk=1:n
-    %Eb/N0与SNR的转换
-    if cfgLDPCEnc.NumInformationBits==1040
-        snr=Ebn0(kk)+10*log10(1/3);
-    else
-        snr=Ebn0(kk)+10*log10(cfgLDPCEnc.CodeRate);
-    end
-    %BPSK解调
-    bpskdemod = comm.BPSKDemodulator('DecisionMethod','Approximate log-likelihood ratio', ...
-        'Variance',1/10^(snr/10));
+    aa=alpha(kk);
+    bb=beta(kk);
     %仿真点数
     for ii=1:times
         %产生随机信息矩阵
@@ -83,83 +90,91 @@ for kk=1:n
             end
         end
 
-        %LDPC译码，采用LLR-BP译码算法
-        [Bob_data,Bob_iter,~] = ldpcDecode(Bob_demodSignal,cfgLDPCDec,maxnumiter);
+        %LDPC译码，采用LLR-MS译码算法
+        Bob_data1 = ldpcDecode(Bob_demodSignal,cfgLDPCDec1,maxnumiter,'MinSumScalingFactor',aa);
+        Bob_data2 = ldpcDecode(Bob_demodSignal,cfgLDPCDec2,maxnumiter,'MinSumOffset',bb);
         %累计单次误比特率
         if cfgLDPCEnc.NumInformationBits==1040
-            [~,err1]= biterr(data(1:1024),Bob_data(1:1024));
+            [~,err11]= biterr(data(1:1024),Bob_data1(1:1024));
         else
-            [~,err1]= biterr(data,Bob_data);
+            [~,err11]= biterr(data,Bob_data1);
         end
-        be(kk)=be(kk)+err1;
+        be1(kk)=be1(kk)+err11;
+        if cfgLDPCEnc.NumInformationBits==1040
+            [~,err21]= biterr(data(1:1024),Bob_data2(1:1024));
+        else
+            [~,err21]= biterr(data,Bob_data2);
+        end
+        be2(kk)=be2(kk)+err21;
         %累计误包数
-        if err1==0
-            err2=0;
+        if err11==0
+            err12=0;
         else
-            err2=1;
+            err12=1;
         end
-        ble(kk)=ble(kk)+err2;
-        %累计迭代次数
-        ite(kk)=ite(kk)+Bob_iter;
+        ble1(kk)=ble1(kk)+err12;
+        if err21==0
+            err22=0;
+        else
+            err22=1;
+        end
+        ble2(kk)=ble2(kk)+err22;
         %计算误码率,误包率和平均迭代次数
-        ber(kk)=be(kk)/ii;
-        bler(kk)=ble(kk)/ii;
-        iter(kk)=ite(kk)/ii;
+        ber1(kk)=be1(kk)/ii;
+        bler1(kk)=ble1(kk)/ii;
+        ber2(kk)=be2(kk)/ii;
+        bler2(kk)=ble2(kk)/ii;
+
 
         %每1000个点打印当前结果
         if mod(ii,1000)==0
             disp(strcat("times:",num2str(ii)))
-            disp("ber:")
-            disp(ber)
-            disp("bler:")
-            disp(bler)
-            disp("iter:")
-            disp(iter)
+            disp("ber1:")
+            disp(ber1)
+            disp("bler1:")
+            disp(bler1)
+            disp("ber2:")
+            disp(ber2)
+            disp("bler2:")
+            disp(bler2)
         end
-        % 保存数据
-        if ble(kk)>minble
-            disp(strcat("times:",num2str(ii)))
-            disp("ber:")
-            disp(ber)
-            disp("bler:")
-            disp(bler)
-            disp("iter:")
-            disp(iter)
-            save("error_floor.mat","minble","Ebn0","be","ble","ber","bler","ite","iter");
+
+        if ble1(kk)>minble && ble2(kk)>minble
             break;
         end
     end
+    % 保存数据
+    disp(strcat("times:",num2str(ii)))
+    disp("ber1:")
+    disp(ber1)
+    disp("bler1:")
+    disp(bler1)
+    disp("ber2:")
+    disp(ber2)
+    disp("bler2:")
+    disp(bler2)
+    save("error_floor_optimize.mat","minble","Ebn0","alpha","beta","be1","ble1","ber1","bler1","be2","ble2","ber2","bler2");
 end
 
 %绘制曲线
-load("error_floor.mat");
+load("error_floor_optimize.mat");
 %%
 figure;
-semilogy(Ebn0,ber);
-xlabel('Eb/n0(dB)');
+semilogy(alpha,ber1,beta,ber2);
+xlabel('alpha/beta');
 ylabel('BER');
-title('BIAWGN');
-legend(strcat('ble:',num2str(minble)));
+title(strcat('ble:',num2str(minble),' Ebn0:',num2str(Ebn0),'dB'));
+legend('NMS','OMS');
 grid on
 hold on
-savefig("error_floor_ber.fig")
+savefig("error_floor_optimize_ber.fig")
 
 figure;
-semilogy(Ebn0,bler);
-xlabel('Eb/n0(dB)');
+semilogy(alpha,bler1,beta,bler2);
+xlabel('alpha/beta');
 ylabel('BLER');
-title('BIAWGN');
-legend(strcat('ble:',num2str(minble)));
+title(strcat('ble:',num2str(minble),' Ebn0:',num2str(Ebn0),'dB'));
+legend('NMS','OMS');
 grid on
 hold on
-savefig("error_floor_bler.fig")
-
-figure;
-plot(Ebn0,iter);
-xlabel('Eb/n0(dB)');
-ylabel('ITER');
-title('BIAWGN');
-legend(strcat('ble:',num2str(minble)));
-grid on
-hold on
-savefig("error_floor_iter.fig")
+savefig("error_floor_optimize_bler.fig")
