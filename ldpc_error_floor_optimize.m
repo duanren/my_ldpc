@@ -5,9 +5,9 @@ rng('shuffle');
 
 %从当前目录下H加载矩阵
 % load("H_1_3.mat");
-load("H_1_6.mat");
+% load("H_1_6.mat");
 % load("H_1_10.mat");
-% load("H_1_20.mat");
+load("H_1_20.mat");
 
 %若H不是QC-LDPC或典型形式，需化作典型形式
 H=double(H);
@@ -23,7 +23,7 @@ times=1e5;
 
 %BIAWGN信道
 %信道参数Eb/n0
-Ebn0=0.6;%仿真起点
+Ebn0=1;%仿真起点
 alpha=[0.1 0.2 0.3 0.4 0.5 0.55 0.6 0.65 0.7 0.75 0.8 0.9];
 beta=alpha;
 n=length(beta);
@@ -92,7 +92,6 @@ for kk=1:n
 
         %LDPC译码，采用LLR-MS译码算法
         Bob_data1 = ldpcDecode(Bob_demodSignal,cfgLDPCDec1,maxnumiter,'MinSumScalingFactor',aa);
-        Bob_data2 = ldpcDecode(Bob_demodSignal,cfgLDPCDec2,maxnumiter,'MinSumOffset',bb);
         %累计单次误比特率
         if cfgLDPCEnc.NumInformationBits==1040
             [~,err11]= biterr(data(1:1024),Bob_data1(1:1024));
@@ -100,12 +99,7 @@ for kk=1:n
             [~,err11]= biterr(data,Bob_data1);
         end
         be1(kk)=be1(kk)+err11;
-        if cfgLDPCEnc.NumInformationBits==1040
-            [~,err21]= biterr(data(1:1024),Bob_data2(1:1024));
-        else
-            [~,err21]= biterr(data,Bob_data2);
-        end
-        be2(kk)=be2(kk)+err21;
+
         %累计误包数
         if err11==0
             err12=0;
@@ -113,6 +107,75 @@ for kk=1:n
             err12=1;
         end
         ble1(kk)=ble1(kk)+err12;
+
+        %计算误码率,误包率和平均迭代次数
+        ber1(kk)=be1(kk)/ii;
+        bler1(kk)=ble1(kk)/ii;
+
+
+        %每1000个点打印当前结果
+        if mod(ii,1000)==0
+            disp(strcat("times:",num2str(ii)))
+            disp("ber1:")
+            disp(ber1)
+            disp("bler1:")
+            disp(bler1)
+            disp("ber2:")
+            disp(ber2)
+            disp("bler2:")
+            disp(bler2)
+        end
+
+        if ble1(kk)>minble
+            break;
+        end
+    end
+
+    for ii=1:times
+        %产生随机信息矩阵
+        data = randi([0 1],cfgLDPCEnc.NumInformationBits,1);
+        %缩短比特初始化(5G)
+        if cfgLDPCEnc.NumInformationBits==1040
+            for hh=1025:1040
+                data(hh)=0;
+            end
+        end
+        %LDPC编码
+        encodedData=ldpcEncode(data,cfgLDPCEnc);
+        %BPSK调制
+        modSignal = bpskmod(encodedData);
+        %AWGN信道
+        Bob_Signal = awgn(modSignal,snr);
+        %BPSK解调
+        Bob_demodSignal = bpskdemod(Bob_Signal);
+
+        %预处理(5G)
+        if cfgLDPCEnc.NumInformationBits==1040
+            %打孔
+            for hh=1:208
+                Bob_demodSignal(rearranged_cols==hh)=0;
+            end
+            for hh=3297:3328
+                Bob_demodSignal(rearranged_cols==hh)=0;
+            end
+            %缩短
+            for hh=1025:1040
+                Bob_demodSignal(rearranged_cols==hh)=realmax;
+            end
+        end
+
+        %LDPC译码，采用LLR-MS译码算法
+        Bob_data2 = ldpcDecode(Bob_demodSignal,cfgLDPCDec2,maxnumiter,'MinSumOffset',bb);
+        %累计单次误比特率
+
+        if cfgLDPCEnc.NumInformationBits==1040
+            [~,err21]= biterr(data(1:1024),Bob_data2(1:1024));
+        else
+            [~,err21]= biterr(data,Bob_data2);
+        end
+        be2(kk)=be2(kk)+err21;
+        %累计误包数
+
         if err21==0
             err22=0;
         else
@@ -120,8 +183,7 @@ for kk=1:n
         end
         ble2(kk)=ble2(kk)+err22;
         %计算误码率,误包率和平均迭代次数
-        ber1(kk)=be1(kk)/ii;
-        bler1(kk)=ble1(kk)/ii;
+
         ber2(kk)=be2(kk)/ii;
         bler2(kk)=ble2(kk)/ii;
 
@@ -139,7 +201,7 @@ for kk=1:n
             disp(bler2)
         end
 
-        if ble1(kk)>minble && ble2(kk)>minble
+        if ble2(kk)>minble
             break;
         end
     end
